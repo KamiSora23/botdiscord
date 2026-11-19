@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* Tokens de NEXUS (docs/NEXUS_UI_SPEC.md §1). Un tema claro solo tendría que redefinir estas variables. */
+:root {
+  --nx-bg: #11131b;
+  --nx-sidebar: #171923;
+  --nx-panel: #1e202d;
+  --nx-panel-hover: #24273a;
+  --nx-input: #252938;
+  --nx-border: #2e3245;
+  --nx-text: #e5e7eb;
+  --nx-text-muted: #9ca3af;
+  --nx-primary: #7465f7;
+  --nx-primary-solid: #6455e8;
+  --nx-primary-text: #8b7cff;
+  --nx-success: #22c55e;
+  --nx-warning: #f59e0b;
+  --nx-danger: #ef4444;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--nx-bg);
+  --color-sidebar: var(--nx-sidebar);
+  --color-panel: var(--nx-panel);
+  --color-panel-hover: var(--nx-panel-hover);
+  --color-input: var(--nx-input);
+  --color-border: var(--nx-border);
+  --color-text: var(--nx-text);
+  --color-muted: var(--nx-text-muted);
+  --color-primary: var(--nx-primary);
+  --color-primary-solid: var(--nx-primary-solid);
+  --color-primary-text: var(--nx-primary-text);
+  --color-success: var(--nx-success);
+  --color-warning: var(--nx-warning);
+  --color-danger: var(--nx-danger);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--nx-bg);
+  color: var(--nx-text);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--nx-primary);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--nx-primary) 40%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Resalta un campo al llegar desde la búsqueda global (Ctrl K). */
+.nx-highlight {
+  animation: nx-flash 2s ease-out;
+  border-radius: 12px;
+}
+@keyframes nx-flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--nx-primary);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}

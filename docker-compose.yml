@@ -1,0 +1,143 @@
+# NEXUS BOT en el servidor (Docker + Cloudflare Tunnel). En local se usa Laragon, no Docker.
+#
+#   1. cp .env.example .env   y rellénalo (ENV=production, dominio, claves; ver docs/DEPLOY.md)
+#   2. La red de Cloudflare debe existir:   docker network create cloudflare_red   (si aún no está)
+#   3. docker compose up -d --build
+#
+# Servicios:
+#   nexus-dashboard  panel web  → el único que publica puerto y está en «cloudflare_red»
+#                    (tu cloudflared lo encuentra como http://nexus-dashboard:3000)
+#   nexus-api        API (FastAPI); el panel le reenvía /api/*
+#   nexus-bot        el bot de Discord
+#   nexus-migrate    aplica las migraciones de la base de datos y termina
+#   nexus-db         PostgreSQL     nexus-redis   Redis
+# La API, el bot, la base de datos y Redis quedan en la red interna «nexus» (sin puertos abiertos).
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: nexus-backend:latest
+  env_file:
+    - .env
+  environment:
+    # Dentro de Docker la base de datos y Redis se llaman por el nombre del servicio.
+    DATABASE_URL: postgresql://${DB_USER:-nexus}:${DB_PASSWORD:?Falta DB_PASSWORD en .env}@db:5432/${DB_NAME:-nexus}
+    REDIS_URL: redis://redis:6379/0
+    ENV: production
+    TRUST_CLOUDFLARE: "true"
+  networks:
+    - nexus
+
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+      args:
+        NEXUS_API_URL: http://api:8000
+    image: nexus-dashboard:latest
+    container_name: nexus-dashboard
+    restart: unless-stopped
+    ports:
+      - "${NEXUS_PORT:-5010}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - nexus
+      - cloudflare_red
+
+  api:
+    <<: *backend
+    container_name: nexus-api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "nexus_api.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  bot:
+    <<: *backend
+    container_name: nexus-bot
+    command: ["python", "-m", "nexus_bot"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    # Sano mientras su heartbeat siga en Redis (se renueva solo; caduca si el bot se cuelga).
+    healthcheck:
+      test: ["CMD", "python", "-m", "nexus_bot.healthcheck"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  migrate:
+    <<: *backend
+    container_name: nexus-migrate
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:18-alpine
+    container_name: nexus-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER:-nexus}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?Falta DB_PASSWORD en .env}
+      - POSTGRES_DB=${DB_NAME:-nexus}
+    # Sin puerto publicado a propósito: solo la API, el bot y migrate la usan por la red interna.
+    # Si necesitas conectarte desde el propio servidor (p. ej. con DBeaver por túnel SSH), descomenta:
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+    volumes:
+      - nexus_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-nexus} -d ${DB_NAME:-nexus}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nexus
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    restart: unless-stopped
+    # Solo caché y mensajería entre el panel y el bot: no necesita guardar nada en disco.
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus
+
+networks:
+  nexus:
+    name: nexus_internal
+  cloudflare_red:
+    external: true
+
+volumes:
+  nexus_pgdata:
